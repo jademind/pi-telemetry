@@ -96,6 +96,14 @@ function atomicWriteJson(filePath: string, data: unknown) {
   fs.renameSync(tmpPath, filePath);
 }
 
+function readJson(filePath: string): unknown {
+  try {
+    return JSON.parse(fs.readFileSync(filePath, "utf8"));
+  } catch {
+    return undefined;
+  }
+}
+
 function safeUnlink(filePath: string) {
   try {
     fs.unlinkSync(filePath);
@@ -238,6 +246,10 @@ export default function (pi: ExtensionAPI) {
     atomicWriteJson(telemetryFile, snapshot);
   }
 
+  function parseCommandArgs(args: string): string[] {
+    return args.trim().split(/\s+/).filter(Boolean);
+  }
+
   function startHeartbeat() {
     if (heartbeat) clearInterval(heartbeat);
     heartbeat = setInterval(() => {
@@ -266,11 +278,45 @@ export default function (pi: ExtensionAPI) {
   }
 
   pi.registerCommand("pi-telemetry", {
-    description: "Show where this process publishes telemetry",
-    handler: async (_args, ctx) => {
+    description: "Show telemetry path and optionally emit the latest telemetry JSON",
+    handler: async (args, ctx) => {
       publish(ctx, "command:pi-telemetry");
-      const msg = `pi-telemetry → ${telemetryFile}`;
-      if (ctx.hasUI) ctx.ui.notify(msg, "info");
+
+      const argv = parseCommandArgs(args);
+      const wantsData = argv.includes("--data") || argv.includes("--json");
+      const pretty = argv.includes("--pretty");
+
+      const locationMsg = `pi-telemetry → ${telemetryFile}`;
+      if (!wantsData) {
+        if (ctx.hasUI) ctx.ui.notify(locationMsg, "info");
+        return;
+      }
+
+      const snapshot = readJson(telemetryFile);
+      if (!snapshot) {
+        const errorMsg = `${locationMsg}\n(no telemetry snapshot available yet)`;
+        pi.sendMessage({
+          customType: "pi-telemetry",
+          content: errorMsg,
+          display: true,
+        });
+        if (ctx.hasUI) ctx.ui.notify("pi-telemetry: no snapshot available yet", "warning");
+        return;
+      }
+
+      const payload = JSON.stringify(snapshot, null, pretty ? 2 : 0);
+      const output = `${locationMsg}\n${payload}`;
+
+      pi.sendMessage({
+        customType: "pi-telemetry",
+        content: output,
+        display: true,
+        details: {
+          telemetryFile,
+        },
+      });
+
+      if (ctx.hasUI) ctx.ui.notify("pi-telemetry: telemetry JSON emitted as message", "info");
     },
   });
 

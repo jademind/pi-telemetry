@@ -51,6 +51,8 @@ Environment variables:
 Inside Pi, use:
 
 - `/pi-telemetry` to display the active telemetry file path.
+- `/pi-telemetry --data` (or `--json`) to also print the latest per-process telemetry payload.
+- Add `--pretty` for formatted JSON output.
 
 ---
 
