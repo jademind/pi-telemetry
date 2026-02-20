@@ -1,6 +1,6 @@
 {
   "name": "pi-telemetry",
-  "version": "1.0.0",
+  "version": "0.1.0",
   "description": "Structured runtime telemetry for pi-coding-agent, optimized for external services and observability pipelines.",
   "keywords": [
     "pi-package",
