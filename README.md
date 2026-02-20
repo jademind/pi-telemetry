@@ -1,6 +1,6 @@
 # pi-telemetry
 
-Structured runtime telemetry for `pi-coding-agent`, designed for external services (menu bar apps, daemons, web dashboards, alerting pipelines).
+Structured runtime telemetry for `pi-coding-agent`, designed for external services (menu bar apps, daemons, web dashboards, alerting pipelines), including the free open-source macOS app [`pi-statusbar`](https://github.com/jademind/pi-statusbar).
 
 `pi-telemetry` publishes one JSON heartbeat file per running Pi process and ships a snapshot CLI to aggregate all active processes into a single machine-level payload.
 
