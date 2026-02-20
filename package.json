@@ -1,0 +1,42 @@
+{
+  "name": "pi-telemetry",
+  "version": "1.0.0",
+  "description": "Structured runtime telemetry for pi-coding-agent, optimized for external services and observability pipelines.",
+  "keywords": [
+    "pi-package",
+    "pi",
+    "pi-coding-agent",
+    "telemetry",
+    "observability"
+  ],
+  "license": "MIT",
+  "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/jademind/pi-telemetry.git"
+  },
+  "homepage": "https://github.com/jademind/pi-telemetry#readme",
+  "bugs": {
+    "url": "https://github.com/jademind/pi-telemetry/issues"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "files": [
+    "extensions",
+    "bin",
+    "README.md",
+    "LICENSE"
+  ],
+  "bin": {
+    "pi-telemetry-snapshot": "./bin/pi-telemetry-snapshot.mjs"
+  },
+  "pi": {
+    "extensions": [
+      "./extensions"
+    ]
+  },
+  "peerDependencies": {
+    "@mariozechner/pi-coding-agent": "*"
+  }
+}
