@@ -66,6 +66,7 @@ interface InstanceSnapshot {
   };
   messages?: {
     lastAssistantText?: string;
+    lastAssistantHtml?: string;
     lastAssistantUpdatedAt: number;
   };
   lastEvent: string;
@@ -97,6 +98,21 @@ function sanitizeAssistantText(text: string | undefined): string | undefined {
   const normalized = text.replace(/\r\n?/g, "\n").trim();
   if (!normalized) return undefined;
   return normalized.length > 16_000 ? `${normalized.slice(0, 15_997)}...` : normalized;
+}
+
+function escapeHtml(text: string): string {
+  return text
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
+}
+
+function assistantTextToHtml(text: string | undefined): string | undefined {
+  if (!text) return undefined;
+  const escaped = escapeHtml(text);
+  return `<div class=\"pi-last-assistant\"><pre>${escaped}</pre></div>`;
 }
 
 function extractTextContent(content: unknown): string | undefined {
@@ -242,6 +258,7 @@ export default function (pi: ExtensionAPI) {
     if (lastAssistantText) {
       lastAssistantTextCache = lastAssistantText;
     }
+    const lastAssistantHtml = assistantTextToHtml(lastAssistantText);
 
     return {
       schemaVersion: 2,
@@ -285,6 +302,7 @@ export default function (pi: ExtensionAPI) {
       },
       messages: {
         lastAssistantText,
+        lastAssistantHtml,
         lastAssistantUpdatedAt: Date.now(),
       },
       lastEvent,
@@ -329,48 +347,57 @@ export default function (pi: ExtensionAPI) {
     heartbeat = undefined;
   }
 
-  pi.registerCommand("pi-telemetry", {
-    description: "Show telemetry path and optionally emit the latest telemetry JSON",
-    handler: async (args, ctx) => {
-      publish(ctx, "command:pi-telemetry");
+  try {
+    pi.registerCommand("pi-telemetry", {
+      description: "Show telemetry path and optionally emit the latest telemetry JSON",
+      handler: async (args, ctx) => {
+        publish(ctx, "command:pi-telemetry");
 
-      const argv = parseCommandArgs(args);
-      const wantsData = argv.includes("--data") || argv.includes("--json");
-      const pretty = argv.includes("--pretty");
+        const argv = parseCommandArgs(args);
+        const wantsData = argv.includes("--data") || argv.includes("--json");
+        const pretty = argv.includes("--pretty");
 
-      const locationMsg = `pi-telemetry → ${telemetryFile}`;
-      if (!wantsData) {
-        if (ctx.hasUI) ctx.ui.notify(locationMsg, "info");
-        return;
-      }
+        const locationMsg = `pi-telemetry → ${telemetryFile}`;
+        if (!wantsData) {
+          if (ctx.hasUI) ctx.ui.notify(locationMsg, "info");
+          return;
+        }
 
-      const snapshot = readJson(telemetryFile);
-      if (!snapshot) {
-        const errorMsg = `${locationMsg}\n(no telemetry snapshot available yet)`;
+        const snapshot = readJson(telemetryFile);
+        if (!snapshot) {
+          const errorMsg = `${locationMsg}\n(no telemetry snapshot available yet)`;
+          pi.sendMessage({
+            customType: "pi-telemetry",
+            content: errorMsg,
+            display: true,
+          });
+          if (ctx.hasUI) ctx.ui.notify("pi-telemetry: no snapshot available yet", "warning");
+          return;
+        }
+
+        const payload = JSON.stringify(snapshot, null, pretty ? 2 : 0);
+        const output = `${locationMsg}\n${payload}`;
+
         pi.sendMessage({
           customType: "pi-telemetry",
-          content: errorMsg,
+          content: output,
           display: true,
+          details: {
+            telemetryFile,
+          },
         });
-        if (ctx.hasUI) ctx.ui.notify("pi-telemetry: no snapshot available yet", "warning");
-        return;
-      }
 
-      const payload = JSON.stringify(snapshot, null, pretty ? 2 : 0);
-      const output = `${locationMsg}\n${payload}`;
-
-      pi.sendMessage({
-        customType: "pi-telemetry",
-        content: output,
-        display: true,
-        details: {
-          telemetryFile,
-        },
-      });
-
-      if (ctx.hasUI) ctx.ui.notify("pi-telemetry: telemetry JSON emitted as message", "info");
-    },
-  });
+        if (ctx.hasUI) ctx.ui.notify("pi-telemetry: telemetry JSON emitted as message", "info");
+      },
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (message.includes("conflicts with")) {
+      console.warn(`[pi-telemetry] command /pi-telemetry already registered (${message})`);
+    } else {
+      throw error;
+    }
+  }
 
   pi.on("session_start", async (_event, ctx) => {
     publish(ctx, "session_start");

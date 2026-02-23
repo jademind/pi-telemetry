@@ -98,6 +98,7 @@ Top-level snapshot (`schemaVersion: 2`) includes:
 - `context`: token usage and pressure classification
 - `capabilities`: currently `hasUI`
 - `messages.lastAssistantText`: latest assistant response text when available via Pi API
+- `messages.lastAssistantHtml`: HTML-safe rendering of latest assistant text (`<div class="pi-last-assistant"><pre>...</pre></div>`)
 - `messages.lastAssistantUpdatedAt`: timestamp (ms) for latest assistant text capture
 - `lastEvent`: most recent triggering Pi lifecycle event
 - `telemetry`: snapshot-side metadata (`alive`, `stale`, `ageMs`, source file)
