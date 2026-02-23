@@ -99,6 +99,33 @@ function sanitizeAssistantText(text: string | undefined): string | undefined {
   return normalized.length > 16_000 ? `${normalized.slice(0, 15_997)}...` : normalized;
 }
 
+function extractTextContent(content: unknown): string | undefined {
+  if (!Array.isArray(content)) return undefined;
+  const parts = content
+    .filter((item): item is { type: string; text?: string } => !!item && typeof item === "object")
+    .filter((item) => item.type === "text" && typeof item.text === "string")
+    .map((item) => item.text!.trim())
+    .filter(Boolean);
+  if (parts.length === 0) return undefined;
+  return parts.join("\n");
+}
+
+function getLastAssistantTextFromBranch(ctx: ExtensionContext): string | undefined {
+  const branch = ctx.sessionManager.getBranch();
+  for (let i = branch.length - 1; i >= 0; i -= 1) {
+    const entry = branch[i] as { type?: string; message?: { role?: string; stopReason?: string; content?: unknown } };
+    if (entry?.type !== "message") continue;
+    const msg = entry.message;
+    if (!msg || msg.role !== "assistant") continue;
+    if (typeof msg.stopReason === "string" && msg.stopReason !== "stop") continue;
+
+    const text = extractTextContent(msg.content);
+    const cleaned = sanitizeAssistantText(text);
+    if (cleaned) return cleaned;
+  }
+  return undefined;
+}
+
 function atomicWriteJson(filePath: string, data: unknown) {
   const dir = path.dirname(filePath);
   fs.mkdirSync(dir, { recursive: true });
@@ -190,6 +217,7 @@ export default function (pi: ExtensionAPI) {
   let heartbeatSeq = 0;
   let lastSnapshot: InstanceSnapshot | undefined;
   let heartbeat: ReturnType<typeof setInterval> | undefined;
+  let lastAssistantTextCache: string | undefined;
 
   function makeSnapshot(ctx: ExtensionContext, lastEvent: string): InstanceSnapshot {
     const contextUsage = ctx.getContextUsage();
@@ -206,7 +234,14 @@ export default function (pi: ExtensionAPI) {
         }
       : undefined;
 
-    const lastAssistantText = sanitizeAssistantText((ctx as ExtensionContext & { getLastAssistantText?: () => string | undefined }).getLastAssistantText?.());
+    const apiLastAssistantText = sanitizeAssistantText(
+      (ctx as ExtensionContext & { getLastAssistantText?: () => string | undefined }).getLastAssistantText?.(),
+    );
+    const branchLastAssistantText = getLastAssistantTextFromBranch(ctx);
+    const lastAssistantText = apiLastAssistantText ?? branchLastAssistantText ?? lastAssistantTextCache;
+    if (lastAssistantText) {
+      lastAssistantTextCache = lastAssistantText;
+    }
 
     return {
       schemaVersion: 2,
