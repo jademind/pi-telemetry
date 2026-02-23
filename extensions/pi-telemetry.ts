@@ -64,6 +64,10 @@ interface InstanceSnapshot {
   capabilities: {
     hasUI: boolean;
   };
+  messages?: {
+    lastAssistantText?: string;
+    lastAssistantUpdatedAt: number;
+  };
   lastEvent: string;
 }
 
@@ -86,6 +90,13 @@ function getThresholds() {
     close: Number.isFinite(close) ? close : 85,
     near: Number.isFinite(near) ? near : 95,
   };
+}
+
+function sanitizeAssistantText(text: string | undefined): string | undefined {
+  if (!text) return undefined;
+  const normalized = text.replace(/\r\n?/g, "\n").trim();
+  if (!normalized) return undefined;
+  return normalized.length > 16_000 ? `${normalized.slice(0, 15_997)}...` : normalized;
 }
 
 function atomicWriteJson(filePath: string, data: unknown) {
@@ -195,6 +206,8 @@ export default function (pi: ExtensionAPI) {
         }
       : undefined;
 
+    const lastAssistantText = sanitizeAssistantText((ctx as ExtensionContext & { getLastAssistantText?: () => string | undefined }).getLastAssistantText?.());
+
     return {
       schemaVersion: 2,
       source: "pi-telemetry",
@@ -234,6 +247,10 @@ export default function (pi: ExtensionAPI) {
       context: getContextSummary(contextUsage, thresholds.close, thresholds.near),
       capabilities: {
         hasUI: ctx.hasUI,
+      },
+      messages: {
+        lastAssistantText,
+        lastAssistantUpdatedAt: Date.now(),
       },
       lastEvent,
     };
