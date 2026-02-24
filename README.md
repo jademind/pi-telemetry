@@ -179,6 +179,15 @@ Suggested release checklist:
 
 ---
 
+## OSS best practices
+
+- Keep package references scoped (`@jademind/pi-telemetry`, `@jademind/pi-bridge`) in all docs/examples.
+- Preserve backward compatibility in schema fields where possible; document additive vs breaking changes.
+- Prefer atomic writes and bounded payload size to protect downstream readers.
+- Keep release notes aligned across npm package, Git tag, and dependent integrations (status bar / mobile clients).
+
+---
+
 ## License
 
 MIT — see [LICENSE](./LICENSE).
