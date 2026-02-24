@@ -96,6 +96,7 @@ Top-level snapshot (`schemaVersion: 2`) includes:
 - `model`: provider/id/name/thinkingLevel (if available)
 - `state`: activity and idleness flags
 - `context`: token usage and pressure classification
+- `routing`: jump-oriented metadata (tty, mux, mux session, terminal app hints, tmux pane target, zellij tab candidates/match when available)
 - `capabilities`: currently `hasUI`
 - `messages.lastAssistantText`: latest assistant response text when available via Pi API
 - `messages.lastAssistantHtml`: HTML-safe rendering of latest assistant text (`<div class="pi-last-assistant"><pre>...</pre></div>`)

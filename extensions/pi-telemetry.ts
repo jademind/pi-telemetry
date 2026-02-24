@@ -6,6 +6,15 @@ import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-age
 
 type Activity = "working" | "waiting_input" | "unknown";
 type ContextPressure = "normal" | "approaching_limit" | "near_limit" | "at_limit";
+type MuxType = "tmux" | "zellij" | "screen";
+
+type PsRow = {
+  pid: number;
+  ppid: number;
+  comm: string;
+  tty: string;
+  args: string;
+};
 
 interface InstanceSnapshot {
   schemaVersion: 2;
@@ -60,6 +69,41 @@ interface InstanceSnapshot {
     pressure: ContextPressure;
     closeToLimit: boolean;
     nearLimit: boolean;
+  };
+  routing?: {
+    tty?: string;
+    mux?: MuxType;
+    muxSession?: string;
+    muxPid?: number;
+    terminalApp?: string;
+    terminalPid?: number;
+    source: "env" | "ancestry" | "mixed" | "none";
+    env?: {
+      tmux?: string;
+      tmuxPane?: string;
+      zellij?: string;
+      zellijSessionName?: string;
+      zellijPaneId?: string;
+      zellijTabName?: string;
+    };
+    tmux?: {
+      paneTTY?: string;
+      paneTarget?: string;
+      windowName?: string;
+    };
+    zellij?: {
+      tabCandidates?: Array<{
+        index: number;
+        name: string;
+        paneCwd: string;
+      }>;
+      matchedTab?: {
+        index: number;
+        name: string;
+        paneCwd: string;
+        match: "exact" | "suffix" | "single_candidate";
+      };
+    };
   };
   capabilities: {
     hasUI: boolean;
@@ -223,6 +267,311 @@ function getContextSummary(
   };
 }
 
+function safeExecFileSync(cmd: string, args: string[], timeout = 300): string | undefined {
+  try {
+    return execFileSync(cmd, args, {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+      timeout,
+    });
+  } catch {
+    return undefined;
+  }
+}
+
+function readPsRows(): PsRow[] {
+  const output = safeExecFileSync("/bin/ps", ["-axo", "pid=,ppid=,comm=,tty=,args="], 400);
+  if (!output) return [];
+
+  const rows: PsRow[] = [];
+  for (const raw of output.split("\n")) {
+    const line = raw.trim();
+    if (!line) continue;
+
+    const parts = line.split(/\s+/, 5);
+    if (parts.length < 4) continue;
+
+    const pid = Number(parts[0]);
+    const ppid = Number(parts[1]);
+    const comm = parts[2] ?? "";
+    const tty = parts[3] ?? "??";
+    const args = parts[4] ?? comm;
+
+    if (!Number.isFinite(pid) || !Number.isFinite(ppid)) continue;
+    rows.push({ pid, ppid, comm, tty, args });
+  }
+
+  return rows;
+}
+
+function extractZellijSession(args: string): string | undefined {
+  const parts = args.split(/\s+/).filter(Boolean);
+  for (let i = 0; i < parts.length; i++) {
+    const p = parts[i];
+    if ((p === "-s" || p === "--session") && i + 1 < parts.length) {
+      return parts[i + 1];
+    }
+    if (p === "--server" && i + 1 < parts.length) {
+      return path.basename(parts[i + 1]);
+    }
+  }
+  return undefined;
+}
+
+function extractTmuxSession(args: string): string | undefined {
+  const parts = args.split(/\s+/).filter(Boolean);
+  for (let i = 0; i < parts.length; i++) {
+    const p = parts[i] ?? "";
+
+    if ((p === "-t" || p === "--target") && i + 1 < parts.length) {
+      const target = (parts[i + 1] ?? "").trim();
+      if (target) return target.split(":", 1)[0];
+    }
+
+    if (p.startsWith("-t") && p.length > 2) {
+      const target = p.slice(2).trim();
+      if (target) return target.split(":", 1)[0];
+    }
+  }
+  return undefined;
+}
+
+function getTmuxSessionFromCurrentClient(): string | undefined {
+  const output = safeExecFileSync("tmux", ["display-message", "-p", "#S"], 250);
+  const session = output?.trim();
+  return session || undefined;
+}
+
+function detectTerminalFromAncestry(pid: number, byPid: Map<number, PsRow>): { terminalApp?: string; terminalPid?: number } {
+  let cur: number | undefined = pid;
+  const seen = new Set<number>();
+
+  while (cur && !seen.has(cur)) {
+    seen.add(cur);
+    const row = byPid.get(cur);
+    if (!row) break;
+
+    const comm = row.comm.toLowerCase();
+    const args = row.args.toLowerCase();
+
+    if (comm.includes("ghostty") || args.includes("ghostty")) {
+      return { terminalApp: "Ghostty", terminalPid: cur };
+    }
+    if (comm.includes("iterm") || args.includes("iterm")) {
+      return { terminalApp: "iTerm2", terminalPid: cur };
+    }
+    if (comm === "terminal" || args.includes("terminal.app")) {
+      return { terminalApp: "Terminal", terminalPid: cur };
+    }
+
+    cur = row.ppid;
+  }
+
+  return {};
+}
+
+function detectMuxFromAncestry(pid: number, byPid: Map<number, PsRow>): { mux?: MuxType; muxSession?: string; muxPid?: number } {
+  let cur: number | undefined = byPid.get(pid)?.ppid;
+  const seen = new Set<number>();
+
+  while (cur && !seen.has(cur)) {
+    seen.add(cur);
+    const row = byPid.get(cur);
+    if (!row) break;
+
+    const low = row.args.toLowerCase();
+    const comm = row.comm.toLowerCase();
+
+    if (comm.includes("zellij") || /(^|\s|\/)zellij(\s|$)/.test(low)) {
+      return {
+        mux: "zellij",
+        muxSession: extractZellijSession(row.args),
+        muxPid: row.pid,
+      };
+    }
+    if (comm.includes("tmux") || /(^|\s|\/)tmux(\s|$)/.test(low)) {
+      return {
+        mux: "tmux",
+        muxSession: extractTmuxSession(row.args),
+        muxPid: row.pid,
+      };
+    }
+    if (comm.includes("screen") || /(^|\s|\/)screen(\s|$)/.test(low)) {
+      return { mux: "screen", muxPid: row.pid };
+    }
+
+    cur = row.ppid;
+  }
+
+  return {};
+}
+
+function getTmuxPaneForTTY(tty: string): { paneTTY?: string; paneTarget?: string; windowName?: string } | undefined {
+  const ttyPath = tty.startsWith("/dev/") ? tty : `/dev/${tty}`;
+  const output = safeExecFileSync(
+    "tmux",
+    ["list-panes", "-a", "-F", "#{pane_tty} #{session_name}:#{window_index}.#{pane_index} #{window_name}"],
+    350,
+  );
+  if (!output) return undefined;
+
+  for (const raw of output.split("\n")) {
+    const line = raw.trim();
+    if (!line) continue;
+    const parts = line.split(" ", 3);
+    if (parts.length < 2) continue;
+
+    const paneTTY = parts[0];
+    const paneTarget = parts[1];
+    const windowName = parts[2] ?? "";
+
+    if (paneTTY === ttyPath) {
+      return { paneTTY, paneTarget, windowName };
+    }
+  }
+
+  return undefined;
+}
+
+type ZellijTabCandidate = { index: number; name: string; paneCwd: string };
+
+function parseZellijPiTabs(layout: string): ZellijTabCandidate[] {
+  let tabIndex = 0;
+  let currentTab = "";
+  const tabs: ZellijTabCandidate[] = [];
+
+  for (const raw of layout.split("\n")) {
+    const line = raw.trim();
+    if (!line) continue;
+
+    if (line.startsWith("tab name=")) {
+      tabIndex += 1;
+      const m = line.match(/name="([^"]+)"/);
+      currentTab = m?.[1] ?? `tab-${tabIndex}`;
+      continue;
+    }
+
+    if (line.includes('pane command="pi"')) {
+      const m = line.match(/cwd="([^"]+)"/);
+      tabs.push({
+        index: tabIndex,
+        name: currentTab,
+        paneCwd: m?.[1] ?? "",
+      });
+    }
+  }
+
+  return tabs;
+}
+
+function getZellijRouting(
+  session: string,
+  cwd: string,
+): {
+  tabCandidates?: ZellijTabCandidate[];
+  matchedTab?: { index: number; name: string; paneCwd: string; match: "exact" | "suffix" | "single_candidate" };
+} | undefined {
+  const output = safeExecFileSync("zellij", ["-s", session, "action", "dump-layout"], 400);
+  if (!output) return undefined;
+
+  const tabCandidates = parseZellijPiTabs(output);
+  if (tabCandidates.length === 0) return { tabCandidates };
+
+  const normalize = (v: string) => path.normalize(v || "").replace(/\\/g, "/").toLowerCase();
+  const cwdNorm = normalize(cwd);
+
+  const exact = tabCandidates.find((t) => normalize(t.paneCwd) === cwdNorm);
+  if (exact) {
+    return {
+      tabCandidates,
+      matchedTab: { ...exact, match: "exact" },
+    };
+  }
+
+  const suffix = tabCandidates.find((t) => {
+    const paneNorm = normalize(t.paneCwd);
+    return paneNorm.length > 0 && (cwdNorm === paneNorm || cwdNorm.endsWith(`/${paneNorm}`));
+  });
+  if (suffix) {
+    return {
+      tabCandidates,
+      matchedTab: { ...suffix, match: "suffix" },
+    };
+  }
+
+  if (tabCandidates.length === 1) {
+    return {
+      tabCandidates,
+      matchedTab: { ...tabCandidates[0], match: "single_candidate" },
+    };
+  }
+
+  return { tabCandidates };
+}
+
+function getRoutingSummary(ctx: ExtensionContext): InstanceSnapshot["routing"] {
+  const rows = readPsRows();
+  const byPid = new Map(rows.map((r) => [r.pid, r]));
+  const self = byPid.get(process.pid);
+
+  const tty = self?.tty && self.tty !== "??" ? self.tty : undefined;
+  const ancestry = detectMuxFromAncestry(process.pid, byPid);
+  const terminal = detectTerminalFromAncestry(process.pid, byPid);
+
+  const env = {
+    tmux: process.env.TMUX,
+    tmuxPane: process.env.TMUX_PANE,
+    zellij: process.env.ZELLIJ,
+    zellijSessionName: process.env.ZELLIJ_SESSION_NAME,
+    zellijPaneId: process.env.ZELLIJ_PANE_ID,
+    zellijTabName: process.env.ZELLIJ_TAB_NAME,
+  };
+
+  let source: InstanceSnapshot["routing"]["source"] = "none";
+
+  const envMux: MuxType | undefined = env.zellij || env.zellijSessionName ? "zellij" : env.tmux ? "tmux" : undefined;
+  const envSession = envMux === "zellij" ? env.zellijSessionName : envMux === "tmux" ? getTmuxSessionFromCurrentClient() : undefined;
+
+  let mux: MuxType | undefined = ancestry.mux;
+  let muxSession = ancestry.muxSession;
+
+  if (envMux && ancestry.mux && envMux === ancestry.mux) {
+    source = "mixed";
+  } else if (envMux) {
+    source = "env";
+    mux = envMux;
+  } else if (ancestry.mux) {
+    source = "ancestry";
+  }
+
+  if (envSession) {
+    muxSession = envSession;
+  }
+
+  const routing: InstanceSnapshot["routing"] = {
+    tty,
+    mux,
+    muxSession,
+    muxPid: ancestry.muxPid,
+    terminalApp: terminal.terminalApp,
+    terminalPid: terminal.terminalPid,
+    source,
+    env,
+  };
+
+  if (mux === "tmux" && tty) {
+    const pane = getTmuxPaneForTTY(tty);
+    if (pane) routing.tmux = pane;
+  }
+
+  if (mux === "zellij" && muxSession) {
+    const zr = getZellijRouting(muxSession, ctx.cwd);
+    if (zr) routing.zellij = zr;
+  }
+
+  return routing;
+}
+
 export default function (pi: ExtensionAPI) {
   const startedAt = Date.now();
   const telemetryDir = getTelemetryDir();
@@ -297,6 +646,7 @@ export default function (pi: ExtensionAPI) {
         busy: !waitingForInput,
       },
       context: getContextSummary(contextUsage, thresholds.close, thresholds.near),
+      routing: getRoutingSummary(ctx),
       capabilities: {
         hasUI: ctx.hasUI,
       },
