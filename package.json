@@ -1,5 +1,5 @@
 {
-  "name": "pi-telemetry",
+  "name": "@jademind/pi-telemetry",
   "version": "0.1.4",
   "description": "Structured runtime telemetry for pi-coding-agent, optimized for external services and observability pipelines.",
   "keywords": [

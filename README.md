@@ -1,8 +1,10 @@
-# pi-telemetry
+# @jademind/pi-telemetry
+
+> Migration: package moved from `pi-telemetry` to `@jademind/pi-telemetry`.
 
 Structured runtime telemetry for `pi-coding-agent`, designed for external services (menu bar apps, daemons, web dashboards, alerting pipelines), including the free open-source macOS app [`pi-statusbar`](https://github.com/jademind/pi-statusbar).
 
-`pi-telemetry` publishes one JSON heartbeat file per running Pi process and ships a snapshot CLI to aggregate all active processes into a single machine-level payload.
+`@jademind/pi-telemetry` publishes one JSON heartbeat file per running Pi process and ships a snapshot CLI to aggregate all active processes into a single machine-level payload.
 
 ---
 
@@ -21,7 +23,7 @@ Structured runtime telemetry for `pi-coding-agent`, designed for external servic
 ## Installation
 
 ```bash
-pi install npm:pi-telemetry
+pi install npm:@jademind/pi-telemetry
 ```
 
 The extension is auto-loaded through the package `pi.extensions` manifest.
