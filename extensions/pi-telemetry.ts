@@ -108,6 +108,19 @@ interface InstanceSnapshot {
   capabilities: {
     hasUI: boolean;
   };
+  extensions?: {
+    telemetry: {
+      package: string;
+      active: boolean;
+    };
+    bridge: {
+      package: string;
+      active: boolean;
+      registryFile: string;
+      updatedAt?: number;
+      stale: boolean;
+    };
+  };
   messages?: {
     lastAssistantText?: string;
     lastAssistantHtml?: string;
@@ -120,6 +133,39 @@ function getTelemetryDir(): string {
   const configured = process.env.PI_TELEMETRY_DIR?.trim();
   if (configured) return configured;
   return path.join(os.homedir(), ".pi", "agent", "telemetry", "instances");
+}
+
+function getBridgeBaseDir(): string {
+  const configured = process.env.PI_BRIDGE_DIR?.trim();
+  if (configured) return configured;
+  return path.join(os.homedir(), ".pi", "agent", "statusbridge");
+}
+
+function getBridgeRegistryStaleMs(): number {
+  const configured = Number(process.env.PI_BRIDGE_REGISTRY_STALE_MS ?? "");
+  const raw = Number.isFinite(configured) && configured > 0 ? configured : 10_000;
+  return Math.max(1000, Math.floor(raw));
+}
+
+function getBridgePresence(pid: number): { active: boolean; stale: boolean; updatedAt?: number; registryFile: string } {
+  const registryFile = path.join(getBridgeBaseDir(), "registry", `${pid}.json`);
+  try {
+    const text = fs.readFileSync(registryFile, "utf8");
+    const payload = JSON.parse(text) as { pid?: unknown; updatedAt?: unknown };
+    if (Number(payload?.pid) !== pid) {
+      return { active: false, stale: true, registryFile };
+    }
+
+    const updatedAt = Number(payload?.updatedAt);
+    if (!Number.isFinite(updatedAt) || updatedAt <= 0) {
+      return { active: false, stale: true, registryFile };
+    }
+
+    const stale = Date.now() - updatedAt > getBridgeRegistryStaleMs();
+    return { active: !stale, stale, updatedAt, registryFile };
+  } catch {
+    return { active: false, stale: true, registryFile };
+  }
 }
 
 function getHeartbeatMs(): number {
@@ -608,6 +654,7 @@ export default function (pi: ExtensionAPI) {
       lastAssistantTextCache = lastAssistantText;
     }
     const lastAssistantHtml = assistantTextToHtml(lastAssistantText);
+    const bridge = getBridgePresence(process.pid);
 
     return {
       schemaVersion: 2,
@@ -650,6 +697,19 @@ export default function (pi: ExtensionAPI) {
       capabilities: {
         hasUI: ctx.hasUI,
       },
+      extensions: {
+        telemetry: {
+          package: "@jademind/pi-telemetry",
+          active: true,
+        },
+        bridge: {
+          package: "@jademind/pi-bridge",
+          active: bridge.active,
+          registryFile: bridge.registryFile,
+          updatedAt: bridge.updatedAt,
+          stale: bridge.stale,
+        },
+      },
       messages: {
         lastAssistantText,
         lastAssistantHtml,
@@ -676,6 +736,7 @@ export default function (pi: ExtensionAPI) {
       if (!lastSnapshot) return;
       heartbeatSeq += 1;
       const now = Date.now();
+      const bridge = getBridgePresence(process.pid);
       const next: InstanceSnapshot = {
         ...lastSnapshot,
         process: {
@@ -683,6 +744,19 @@ export default function (pi: ExtensionAPI) {
           updatedAt: now,
           uptimeMs: now - startedAt,
           heartbeatSeq,
+        },
+        extensions: {
+          telemetry: {
+            package: "@jademind/pi-telemetry",
+            active: true,
+          },
+          bridge: {
+            package: "@jademind/pi-bridge",
+            active: bridge.active,
+            registryFile: bridge.registryFile,
+            updatedAt: bridge.updatedAt,
+            stale: bridge.stale,
+          },
         },
       };
       lastSnapshot = next;

@@ -100,6 +100,9 @@ Top-level snapshot (`schemaVersion: 2`) includes:
 - `context`: token usage and pressure classification
 - `routing`: jump-oriented metadata (tty, mux, mux session, terminal app hints, tmux pane target, zellij tab candidates/match when available)
 - `capabilities`: currently `hasUI`
+- `extensions`:
+  - `telemetry`: extension presence (`@jademind/pi-telemetry`, always active when snapshot exists)
+  - `bridge`: per-PID bridge activity (`@jademind/pi-bridge`) inferred from `~/.pi/agent/statusbridge/registry/<pid>.json` freshness
 - `messages.lastAssistantText`: latest assistant response text when available via Pi API
 - `messages.lastAssistantHtml`: HTML-safe rendering of latest assistant text (`<div class="pi-last-assistant"><pre>...</pre></div>`)
 - `messages.lastAssistantUpdatedAt`: timestamp (ms) for latest assistant text capture
