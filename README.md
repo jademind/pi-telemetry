@@ -130,6 +130,7 @@ Additional booleans are provided for easy filtering:
 ### macOS status bar app (open source / free)
 
 - [`pi-statusbar`](https://github.com/jademind/pi-statusbar): a free macOS status bar application for Pi built on top of `pi-telemetry`.
+- [`PiTalk`](https://github.com/swairshah/PiTalk): an additional open-source integration example using `pi-telemetry`.
 
 ### Poll from a daemon
 
